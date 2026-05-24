@@ -6,6 +6,7 @@ FocusScope {
     width: 1280
     height: 720
     focus: true;
+
     FontLoader {
         id: customFont
         source: "assets/fonts/851tegaki.ttf"
@@ -21,6 +22,7 @@ FocusScope {
 
         // 音量調整（0.0 が消音、1.0 が最大音量。BGMなので少し小さめの 0.4 がおすすめ）
         volume: 0.2
+        autoPlay: root.showMainUi;
 
         // テーマが読み込まれたら自動的に再生を開始する
     }
@@ -28,7 +30,7 @@ FocusScope {
     // ゲーム起動・終了を検知してBGMを一時停止・再開させるための処理
     // Pegasusが裏に回る際、自動で再生フラグを追従させます
     onActiveFocusChanged: {
-        if (root.activeFocus && !splashLoader.visible)
+        if (root.activeFocus && root.showMainUi)
         {
             bgmPlayer.play(); // アプリに戻ってきたらBGMを再開
         } else {
@@ -69,18 +71,17 @@ Component.onCompleted: {
 
         // 【ゲームからの復帰時】最初からメイン画面を表示
         root.showMainUi = true;
-
+        bgmPlayer.play()
         root.restoreMainFocus();
+
     } else {
     // 【アプリ通常起動時】動画が終わるまでメイン画面は非表示
 
     root.showMainUi = false;
+    ;
     bgmPlayer.stop();
-    api.memory.set("returnFromGameFlag", true);
-
     splashLoader.source = "SplashLayer.qml";
 }
-bgmPlayer.play();
 var savedScreen = api.memory.get("lastScreen");
 var savedCollectionIndex = api.memory.get("lastCollectionIndex");
 
@@ -199,6 +200,12 @@ property bool showMainUi: false
                 platformView.forceActiveFocus();
             } else if (root.currentScreen === "game") {
             gameView.forceActiveFocus();
+        }
+    }
+    Keys.onPressed: {
+        if (event.key === Qt.Key_F5)
+        {
+            api.memory.set("returnFromGameFlag", true);
         }
     }
 }
