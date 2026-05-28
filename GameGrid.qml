@@ -578,7 +578,7 @@ FocusScope {
                                         }
                                         Text {
                                             property int playTimeS: gameRoot.customSortedList[gameGrid.currentIndex].playTime % 60
-                                                property int playTimeM: gameRoot.customSortedList[gameGrid.currentIndex].playTime / 60
+                                                property int playTimeM: gameRoot.customSortedList[gameGrid.currentIndex].playTime / 360 % 60
                                                     property int playTimeH: gameRoot.customSortedList[gameGrid.currentIndex].playTime / 3600
                                                         text: {
                                                             if (gameRoot.customSortedList.length > 0 && gameRoot.customSortedList[gameGrid.currentIndex])
