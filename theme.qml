@@ -67,8 +67,6 @@ Component.onCompleted: {
 
     if (returnFromGame === true)
     {
-        api.memory.set("returnFromGameFlag", false);
-
         // 【ゲームからの復帰時】最初からメイン画面を表示
         root.showMainUi = true;
         bgmPlayer.play()

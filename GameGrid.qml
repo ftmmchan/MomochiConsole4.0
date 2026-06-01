@@ -4,158 +4,183 @@ import QtMultimedia 5.15
 FocusScope {
     id: gameRoot
     property var currentCollection: null
-        property int lastSavedIndex: -1
+        property int savedGridIndex: 0
+
+
             signal goBack()
             // 💡【追加】最外周のFocusScopeに直接操作フォーカスを当てるための初期化
             focus: true
 
-            Connections {
-                target: api.memory
+            Component.onCompleted: {
+                var savedGameIndex = api.memory.get("lastGameIndex");
+                if (savedGameIndex !== undefined && savedGameIndex >= 0)
+                {
+                    // 起動・復帰時にデータがあれば即座にスクロールを0にリセットして暴走を防ぐ
+                    gameGrid.snapMode = GridView.NoSnap;
+                    gameGrid.contentY = 0;
+                    gameGrid.currentIndex = savedGameIndex;
+                    gameGrid.forceActiveFocus();
 
-                // 💡 ゲームから戻ってきた（またはゲームへ行く）時の処理
-                onActiveChanged: {
-                    if (!api.memory.active)
+                    // 監視タイマーを起動
+                    returnScrollTimer.start();
+                }
+            }
+
+            Timer {
+                id: returnScrollTimer
+                interval: 50
+                repeat: true // データが復活するまでループ
+                onTriggered: {
+                    var savedIndex = api.memory.get("lastGameIndex");
+                    var rowCount = Math.round((parent.width - detailPanel.width) / gameGrid.cellWidth);
+                    // データ（count）が復活した瞬間をキャッチ
+                    if (gameGrid.count > 0 && savedIndex < gameGrid.count)
                     {
-                        // ① ゲームが起動する直前：現在の位置をテーマ全体のプロパティ等に一時保存
-                        //（※もしカスタムリストを使っている場合は、gameGrid.currentIndex をそのまま保存します）
-                        if (gameGrid && gameGrid.currentIndex >= 0)
-                        {
-                            gameRoot.lastSavedIndex = gameGrid.currentIndex;
-                        }
-                    } else {
-                    // ② ゲームから戻ってきた瞬間：保存していた位置へ強制的にスクロール＆選択
-                    if (gameGrid && gameRoot.lastSavedIndex !== undefined && gameRoot.lastSavedIndex >= 0)
-                    {
 
-                        // 一度 grid のインデックスをリセット
-                        gameGrid.currentIndex = -1;
+                        // 1. ループを即座に停止
+                        returnScrollTimer.stop();
 
-                        // 保存していたインデックスを再設定
-                        gameGrid.currentIndex = gameRoot.lastSavedIndex;
+                        // 2. スナップ機能を一度完全に切る
+                        gameGrid.snapMode = GridView.NoSnap;
 
-                        // 💡 GridView や ListView の画面表示を、その位置まで強制的にスクロールさせる
-                        if (typeof gameGrid.positionViewAtIndex === "function")
-                        {
-                            // 選択位置が画面中央（GridView.Center）に来るようにスクロール
-                            gameGrid.positionViewAtIndex(gameRoot.lastSavedIndex, GridView.Center);
-                        }
+                        // 💡 3. 【最重要】まずはQMLの公式関数を呼び出し、
+                        // 目的のインデックス周辺のセルをメモリ上に「強制実体化」させます。
+                        // 基準は画面上端（Beginning）に合わせます。
+                        gameGrid.positionViewAtIndex(savedIndex, GridView.Beginning);
 
-                        // 💡 フォーカス（キー操作の権限）をグリッドに再セット
+                        // 💡 4. 【絶対位置の微調整】
+                        // セルが実体化したこの瞬間に、デバッグで判明した完璧な数式を上書きして
+                        // 理想のスクロール位置（contentY）へぴったり固定します。
+                        var finalContentY = Math.floor((savedIndex - 1) * gameGrid.cellHeight / rowCount);
+                        gameGrid.contentY = Math.max(0, finalContentY);
+
+                        // 5. 選択状態と操作フォーカスを固定
+                        gameGrid.currentIndex = savedIndex;
                         gameGrid.forceActiveFocus();
+
+                        // 6. 最後にスナップ機能を安全に復活させる
+                        snapResetTimer.start();
                     }
                 }
             }
-        }
 
-        // =========================================================================
-        // ⚙️ 画面管理プロパティ ＆ 大画面詳細モードのスイッチ
-        // =========================================================================
-        // false: 通常（リストメイン） / true: 画面いっぱいのゲーム詳細画面モード
-        property bool isPanelZoomed: false
+            Timer {
+                id: snapResetTimer
+                interval: 50
+                repeat: false
+                onTriggered: {
+                    gameGrid.snapMode = GridView.SnapToRow;
+                }
+            }
 
-            // お気に入りソート＆フィルタシステム（削除した検索機能を完全クリーンアップ）
-            property var customSortedList: []
-            property string currentFilter: "all"
+            // =========================================================================
+            // ⚙️ 画面管理プロパティ ＆ 大画面詳細モードのスイッチ
+            // =========================================================================
+            // false: 通常（リストメイン） / true: 画面いっぱいのゲーム詳細画面モード
+            property bool isPanelZoomed: false
 
-                // あなたのカスタムデザイン・カラー設定を100%維持
-                property int labelTextSize: 14
-                    property string accentColor: "#00e1ff"
+                // お気に入りソート＆フィルタシステム（削除した検索機能を完全クリーンアップ）
+                property var customSortedList: []
+                property string currentFilter: "all"
 
-                        // 💡【最重要】2回目以降の画面切り替え時にも確実に初期化させるための外部関数
-                        function resetScrollPosition()
-                        {
-                            descScrollAnimation.stop();
-                            descFlickable.contentY = 0;
-                            textContainerColumn.opacity = 1.0;
+                    // あなたのカスタムデザイン・カラー設定を100%維持
+                    property int labelTextSize: 14
+                        property string accentColor: "#00e1ff"
 
-                            // わずかな遅延を挟んでスクロール判定を再始動させる（フライング防止）
-                            recheckTimer.restart();
-                        }
+                            // 💡【最重要】2回目以降の画面切り替え時にも確実に初期化させるための外部関数
+                            function resetScrollPosition()
+                            {
+                                descScrollAnimation.stop();
+                                descFlickable.contentY = 0;
+                                textContainerColumn.opacity = 1.0;
 
-                        // 各種効果音コンポーネント
-                        SoundEffect { id: moveSound; source: "assets/audio/move.wav"; volume: 0.5 }
-                        SoundEffect { id: confirmSound; source: "assets/audio/confirm.wav"; volume: 0.6 }
-                        SoundEffect { id: favoriteSound; source: "assets/audio/confirm.wav"; volume: 0.6 }
-                        SoundEffect { id: filterSound; source: "assets/audio/move.wav"; volume: 0.6 }
-                        SoundEffect { id: zoomSound; source: "assets/audio/move.wav"; volume: 0.6 } // 詳細画面切り替え音
-
-                            // ゲーム起動を少しだけ遅らせるタイマー
-                            Timer {
-                                id: launchDelayTimer
-                                interval: 300
-                                repeat: false
-                                onTriggered: {
-                                    var sortedGame = gameRoot.customSortedList[gameGrid.currentIndex];
-                                    if (sortedGame) sortedGame.launch();
-                                }
+                                // わずかな遅延を挟んでスクロール判定を再始動させる（フライング防止）
+                                recheckTimer.restart();
                             }
 
-                            Rectangle { anchors.fill: parent; color: "transparent" }
+                            // 各種効果音コンポーネント
+                            SoundEffect { id: moveSound; source: "assets/audio/move.wav"; volume: 0.5 }
+                            SoundEffect { id: confirmSound; source: "assets/audio/confirm.wav"; volume: 0.6 }
+                            SoundEffect { id: favoriteSound; source: "assets/audio/confirm.wav"; volume: 0.6 }
+                            SoundEffect { id: filterSound; source: "assets/audio/move.wav"; volume: 0.6 }
+                            SoundEffect { id: zoomSound; source: "assets/audio/move.wav"; volume: 0.6 } // 詳細画面切り替え音
 
-                            // =========================================================================
-                            // 📊 お気に入りソート＆データ振り分け処理
-                            // =========================================================================
-                            function updateSortedList()
-                            {
-                                if (!currentCollection || !currentCollection.games)
+                                // ゲーム起動を少しだけ遅らせるタイマー
+                                Timer {
+                                    id: launchDelayTimer
+                                    interval: 300
+                                    repeat: false
+                                    onTriggered: {
+                                        var sortedGame = gameRoot.customSortedList[gameGrid.currentIndex];
+                                        if (sortedGame) sortedGame.launch();
+                                    }
+                                }
+
+                                Rectangle { anchors.fill: parent; color: "transparent" }
+
+                                // =========================================================================
+                                // 📊 お気に入りソート＆データ振り分け処理
+                                // =========================================================================
+                                function updateSortedList()
                                 {
-                                    customSortedList = [];
-                                    return;
-                                }
-
-                                var favList = [];
-                                var normalList = [];
-
-                                for (var i = 0; i < currentCollection.games.count; i++) {
-                                    var game = currentCollection.games.get(i);
-                                    if (game.favorite)
+                                    if (!currentCollection || !currentCollection.games)
                                     {
-                                        favList.push(game);
-                                    } else {
-                                    normalList.push(game);
+                                        customSortedList = [];
+                                        return;
+                                    }
+
+                                    var favList = [];
+                                    var normalList = [];
+
+                                    for (var i = 0; i < currentCollection.games.count; i++) {
+                                        var game = currentCollection.games.get(i);
+                                        if (game.favorite)
+                                        {
+                                            favList.push(game);
+                                        } else {
+                                        normalList.push(game);
+                                    }
                                 }
+
+                                if (gameRoot.currentFilter === "favorite")
+                                {
+                                    customSortedList = favList;
+                                } else {
+                                customSortedList = favList.concat(normalList);
                             }
-
-                            if (gameRoot.currentFilter === "favorite")
-                            {
-                                customSortedList = favList;
-                            } else {
-                            customSortedList = favList.concat(normalList);
                         }
-                    }
 
-                    onCurrentCollectionChanged: {
-                        gameRoot.currentFilter = "all";
-                        gameRoot.isPanelZoomed = false; // 機種切り替え時は詳細画面を自動で閉じる
-                        updateSortedList();
-                    }
+                        onCurrentCollectionChanged: {
+                            gameRoot.currentFilter = "all";
+                            gameRoot.isPanelZoomed = false; // 機種切り替え時は詳細画面を自動で閉じる
+                            updateSortedList();
+                        }
 
-                    onCurrentFilterChanged: { updateSortedList(); }
+                        onCurrentFilterChanged: { updateSortedList(); }
 
-                    // =========================================================================
-                    // 📐 プラットフォーム固有のアスペクト比・サイズ自動計算
-                    // =========================================================================
-                    property int baseWidth: {
-                        var sName = currentCollection.shortName;
-                        if (sName === "steam" || sName === "ps2" || sName === "psp" || sName === "wii" || sName === "3ds" || sName === "ws" || sName === "wsc") return 220;
-                        return 180;
-                    }
+                        // =========================================================================
+                        // 📐 プラットフォーム固有のアスペクト比・サイズ自動計算
+                        // =========================================================================
+                        property int baseWidth: {
+                            var sName = currentCollection.shortName;
+                            if (sName === "steam" || sName === "ps2" || sName === "psp" || sName === "wii" || sName === "3ds" || sName === "ws" || sName === "wsc") return 220;
+                            return 180;
+                        }
 
-                    property real realAspectRatio: {
-                        var sName = currentCollection.shortName;
-                        if (sName === "gba") return 1.5;
-                        if (sName === "vb") return 1.716;
-                        if (sName === "android") return 1;
-                        if (sName === "steam") return 2.139;
-                        if (sName === "3ds") return 1.666;
-                        if (sName === "md" || sName === "mcd" || sName === "32x") return 1.306;
-                        if (sName === "gb" || sName === "gbc" || sName === "gg") return 1.11;
-                        if (sName === "ngp" || sName === "ngpc") return 1.052;
-                        if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii") return 1.777;
-                        if (sName === "ws" || sName === "wsc") return 1.5541;
-                        return 1.333; // デフォルト値
-                    }
-                    property int dynamicCellWidth: baseWidth
+                        property real realAspectRatio: {
+                            var sName = currentCollection.shortName;
+                            if (sName === "gba") return 1.5;
+                            if (sName === "vb") return 1.716;
+                            if (sName === "android") return 1;
+                            if (sName === "steam") return 2.139;
+                            if (sName === "3ds") return 1.666;
+                            if (sName === "md" || sName === "mcd" || sName === "32x") return 1.306;
+                            if (sName === "gb" || sName === "gbc" || sName === "gg") return 1.11;
+                            if (sName === "ngp" || sName === "ngpc") return 1.052;
+                            if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii") return 1.777;
+                            if (sName === "ws" || sName === "wsc") return 1.5541;
+                            return 1.333; // デフォルト値
+                        }
                         property int dynamicCellHeight: baseWidth / realAspectRatio
 
                             // =========================================================================
@@ -169,6 +194,7 @@ FocusScope {
                                 anchors.right: parent.right
                                 anchors.margins: 40
                                 spacing: 8
+                                z: 2
 
                                 // 💡詳細画面マックス拡大時は、ゲーム情報を引き立たせるために上部ヘッダーを滑らかにフェードアウト
                                 opacity: gameRoot.isPanelZoomed ? 0.0 : 1.0
@@ -754,7 +780,7 @@ FocusScope {
                                                 PropertyAction { target: descFlickable; property: "contentY"; value: 0 }
                                                 PropertyAction { target: textContainerColumn; property: "opacity"; value: 1.0 }
                                                 PauseAnimation { duration: 3500 }
-                                                NumberAnimation { target: descFlickable; property: "contentY"; to: descFlickable.contentHeight - descFlickable.height; duration: (descFlickable.contentHeight - descFlickable.height) * 50; easing.type: Easing.Linear }
+                                                NumberAnimation { target: descFlickable; property: "contentY"; to: descFlickable.contentHeight - descFlickable.height; duration: Math.max(0, (descFlickable.contentHeight - descFlickable.height) * 50); easing.type: Easing.Linear }
                                                 PauseAnimation { duration: 2500 }
                                                 NumberAnimation { target: textContainerColumn; property: "opacity"; to: 0; duration: 400 }
                                                 PropertyAction { target: descFlickable; property: "contentY"; value: 0 }
@@ -770,11 +796,21 @@ FocusScope {
 
                                     GridView {
                                         id: gameGrid
-                                        anchors.top: gameHeaderArea.bottom; anchors.bottom: gameFooterBar.top; anchors.left: parent.left; anchors.right: detailPanel.left
-                                        anchors.topMargin: 10; anchors.bottomMargin: 15; anchors.leftMargin: 40; anchors.rightMargin: 10
+                                        anchors.top: gameHeaderArea.bottom
+                                        anchors.left: parent.left
+                                        anchors.right: detailPanel.left
+                                        width: parent.width - detailPanel.width
+                                        anchors.topMargin: 10
+                                        anchors.leftMargin: 40
+                                        anchors.rightMargin: 10
+                                        anchors.bottomMargin: 10
+                                        height: parent.height - gameHeaderArea.height - gameFooterBar.height - gameFooterBar.height
                                         clip: true
+                                        // 💡 追記：画面外の上下1200ピクセル分のセルを事前に生成・維持しておく
+                                        // これにより、急なスクロールでも上のセルが消えず、見切れるバグを防ぎます
+                                        cacheBuffer: 1200
+                                        z:1
 
-                                        // 💡 変更点1：詳細画面（isPanelZoomed）が開いているときだけ、グリッド自身の入力操作をオフにする
                                         // focusプロパティは生かしたままにするため、キーイベントが最外周（gameRoot）まで透過するようになります
                                         enabled: !gameRoot.isPanelZoomed
 
@@ -784,7 +820,8 @@ FocusScope {
                                         opacity: gameRoot.isPanelZoomed ? 0.0 : 1.0
                                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                                        cellWidth: gameRoot.dynamicCellWidth; cellHeight: gameRoot.dynamicCellHeight
+                                        cellWidth: gameRoot.baseWidth;
+                                        cellHeight: gameRoot.dynamicCellHeight
                                         model: gameRoot.customSortedList
 
                                         onModelChanged: {
@@ -794,263 +831,308 @@ FocusScope {
                                                 if (savedGameIndex !== undefined && savedGameIndex < model.length)
                                                 {
                                                     gameGrid.currentIndex = savedGameIndex;
-                                                    gameGrid.positionViewAtIndex(savedGameIndex, GridView.Contain);
-                                                } else { gameGrid.currentIndex = 0; }
+
+                                                    // F5リロード時のみ：スナップを切って中央配置（引き戻し補正入り）
+                                                    Qt.callLater(function() {
+                                                    gameGrid.snapMode = GridView.NoSnap;
+                                                    gameGrid.positionViewAtIndex(savedGameIndex, GridView.Center);
+                                                    gameGrid.contentY = Math.max(0, gameGrid.contentY - gameGrid.cellHeight);
+                                                    Qt.callLater(function() { gameGrid.snapMode = GridView.SnapToRow; });
+                                                });
+                                            }
+                                            else
+                                            {
+                                                gameGrid.currentIndex = 0;
                                             }
                                         }
+                                        onCurrentIndexChanged: {
+                                            if (currentIndex >= 0 && currentIndex < count)
+                                            {
+                                                api.memory.set("lastGameIndex", currentIndex);
+                                            }
+                                        }
+                                    }
 
-                                        highlightFollowsCurrentItem: true; snapMode: GridView.SnapToRow; highlightMoveDuration: 180; boundsBehavior: Flickable.StopAtBounds
+                                    highlightFollowsCurrentItem: true; snapMode: GridView.SnapToRow; highlightMoveDuration: 0; boundsBehavior: Flickable.StopAtBounds
 
-                                        delegate: Item {
-                                            width: gameGrid.cellWidth; height: gameGrid.cellHeight
-                                            property bool isSelected: index === gameGrid.currentIndex
-                                                property var gameData: modelData
+                                    delegate: Item {
+                                        width: gameGrid.cellWidth; height: gameGrid.cellHeight
+                                        property bool isSelected: index === gameGrid.currentIndex
+                                            property var gameData: modelData
 
-                                                    Rectangle {
+                                                Rectangle {
+                                                    anchors.fill: parent;
+                                                    anchors.margins: 8;
+                                                    color: isSelected ? "#3498db" : (screenshotImage.visible ? Qt.rgba(0.11, 0.11, 0.11, 0.8) : "#2c3e50");
+                                                    radius: 6;
+                                                    clip: true;
+                                                    scale: isSelected ? 1.1 : 1.0;
+                                                    Behavior on scale { NumberAnimation { duration: 100 } }
+                                                    Image {
+                                                        id: screenshotImage;
                                                         anchors.fill: parent;
-                                                        anchors.margins: 8;
-                                                        color: isSelected ? "#3498db" : (screenshotImage.visible ? Qt.rgba(0.11, 0.11, 0.11, 0.8) : "#2c3e50");
-                                                        radius: 6;
-                                                        clip: true;
-                                                        scale: isSelected ? 1.1 : 1.0;
-                                                        Behavior on scale { NumberAnimation { duration: 100 } }
-                                                        Image {
-                                                            id: screenshotImage;
-                                                            anchors.fill: parent;
-                                                            anchors.margins: 0;
-                                                            source:
-                                                            if (currentCollection.shortName === "steam")
-                                                            {
-                                                                source: modelData.assets.boxFront ? modelData.assets.boxFront : "";
-                                                            }else {
-                                                            source: modelData.assets.screenshot ? modelData.assets.screenshot : "";
-                                                        }
-
-                                                        fillMode: Image.PreserveAspectCrop;
-                                                        horizontalAlignment: Image.AlignHCenter;
-                                                        verticalAlignment: Image.AlignVCenter;
-                                                        asynchronous: true;
-                                                        visible: source != "" && status !== Image.Error
+                                                        anchors.margins: 0;
+                                                        source:
+                                                        if (currentCollection.shortName === "steam")
+                                                        {
+                                                            source: modelData.assets.boxFront ? modelData.assets.boxFront : "";
+                                                        }else {
+                                                        source: modelData.assets.screenshot ? modelData.assets.screenshot : "";
                                                     }
-                                                    Image { id: favoriteIcon; anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6; width: 24; height: 24; source: "assets/icons/favorite.png"; fillMode: Image.PreserveAspectFit; asynchronous: true; z: 5; visible: modelData.favorite }
-                                                    Text { id: fallbackText; anchors.centerIn: parent; width: parent.width - 20; text: modelData.title; color: "white"; font.pixelSize: 14; font.bold: true; font.family: customFont.name; visible: !screenshotImage.visible; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
+
+                                                    fillMode: Image.PreserveAspectCrop;
+                                                    horizontalAlignment: Image.AlignHCenter;
+                                                    verticalAlignment: Image.AlignVCenter;
+                                                    asynchronous: true;
+                                                    visible: source != "" && status !== Image.Error
+                                                }
+                                                Image { id: favoriteIcon; anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6; width: 24; height: 24; source: "assets/icons/favorite.png"; fillMode: Image.PreserveAspectFit; asynchronous: true; z: 5; visible: modelData.favorite }
+                                                Text { id: fallbackText; anchors.centerIn: parent; width: parent.width - 20; text: modelData.title; color: "white"; font.pixelSize: 14; font.bold: true; font.family: customFont.name; visible: !screenshotImage.visible; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
+                                            }
+                                        }
+                                        Keys.onLeftPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex % columns !== 0)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexLeft();
+                                        }
+                                        Keys.onRightPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if ((currentIndex % columns !== columns - 1) && (currentIndex + 1 < count))
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexRight();
+                                        }
+                                        Keys.onUpPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex >= columns)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexUp();
+                                        }
+                                        Keys.onDownPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex + columns <= count)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexDown();
+                                        }
+                                    }
+                                    // =========================================================================
+                                    // 🎮 【最重要・変更点2】キー入力を「外枠（FocusScope）」で統括して処理する
+                                    // =========================================================================
+                                    Keys.onPressed: {
+                                        // 💡 大画面詳細モード中（isPanelZoomed === true）の特別キーマッピング
+                                        if (gameRoot.isPanelZoomed)
+                                        {
+                                            // YボタンまたはBボタンで、いつでも大画面を閉じる（縮小してリストへ復帰）
+                                            if (api.keys.isDetails(event) || event.key === Qt.Key_Y || api.keys.isCancel(event))
+                                            {
+                                                event.accepted = true;
+                                                zoomSound.play();
+                                                gameRoot.isPanelZoomed = false;
+                                            }
+                                            // 大画面詳細モード中は、Aボタン（起動）とお気に入り（X）のみ裏側で連動可能にする
+                                            else if (api.keys.isAccept(event))
+                                            {
+                                                event.accepted = true;
+                                                api.memory.set("lastGameIndex", gameGrid.currentIndex);
+                                                confirmSound.play();
+                                                launchDelayTimer.start();
+                                            }
+                                            else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
+                                            {
+                                                event.accepted = true;
+                                                var currentGame1 = gameRoot.customSortedList[gameGrid.currentIndex];
+                                                if (currentGame1)
+                                                {
+                                                    currentGame1.favorite = !currentGame1.favorite; favoriteSound.play();
+                                                }
+                                            }
+                                            return; // 拡大中は上下左右のカーソル移動（リスト操作）を完全に弾く
+                                        }
+
+                                        // 💡 通常モード中（ゲームリスト表示中）の標準キーマッピング
+
+                                        else if (api.keys.isAccept(event))
+                                        {
+                                            event.accepted = true;
+                                            api.memory.set("lastGameIndex", gameGrid.currentIndex);
+                                            api.memory.set("returnFromGameFlag", true);
+                                            confirmSound.play();
+                                            launchDelayTimer.start();
+                                        }
+                                        else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
+                                        {
+                                            event.accepted = true;
+                                            var currentGame2 = gameRoot.customSortedList[gameGrid.currentIndex];
+                                            if (currentGame2)
+                                            {
+                                                currentGame2.favorite = !currentGame2.favorite; favoriteSound.play();
+                                            }
+                                        }
+                                        else if (api.keys.isNextPage(event) || api.keys.isPrevPage(event) || event.key === Qt.Key_Tab)
+                                        {
+                                            event.accepted = true;
+                                            filterSound.play();
+                                            gameGrid.currentIndex = 0;
+                                            api.memory.set("lastGameIndex", 0);
+                                            gameRoot.currentFilter = (gameRoot.currentFilter === "all") ? "favorite" : "all";
+                                        }
+                                        // Yボタンで大画面へズームイン
+                                        else if (api.keys.isDetails(event) || event.key === Qt.Key_Y)
+                                        {
+                                            event.accepted = true;
+                                            zoomSound.play();
+                                            gameRoot.isPanelZoomed = true;
+                                        }
+                                        else if (api.keys.isCancel(event))
+                                        {
+                                            event.accepted = true;
+                                            api.memory.set("returnFromGameFlag", false);
+                                            gameRoot.goBack();
+                                        }
+                                    }
+
+                                    // =========================================================================
+                                    // 📥 4️⃣ 画面下部：操作ガイド（完璧なXbox公式カラー配色＆左寄せライン配置）
+                                    // =========================================================================
+                                    Rectangle {
+                                        id: gameFooterBar
+                                        anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 50; color: Qt.rgba(0, 0, 0, 0.5)
+                                        Row {
+                                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; anchors.leftMargin: 40; spacing: 25
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#107c10";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "A";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "起動";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#e81123";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "B";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: gameRoot.isPanelZoomed ? "詳細を閉じる" : "戻る";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#0078d4";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "X";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: gameRoot.isPanelZoomed ? "ゲームリストに戻る" : "ゲーム詳細画面を開く";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            // 🟡 Yボタン操作ガイド（大画面モードの開閉状態をテキストに動的反映）
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#ffb900";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "Y";
+                                                        color: "#111111";
+                                                        font.bold: true; font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "お気に入り";
+
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 38;
+                                                    height: 22;
+                                                    radius: 4;
+                                                    color: "#d2d2d2";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "L / R";
+                                                        color: "#111111";
+                                                        font.bold: true;
+                                                        font.pixelSize: 11;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "お気に入り絞り込み (Tab)";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
                                                 }
                                             }
                                         }
-                                        // =========================================================================
-                                        // 🎮 【最重要・変更点2】キー入力を「外枠（FocusScope）」で統括して処理する
-                                        // =========================================================================
-                                        Keys.onPressed: {
-                                            // 💡 大画面詳細モード中（isPanelZoomed === true）の特別キーマッピング
-                                            if (gameRoot.isPanelZoomed)
-                                            {
-                                                // YボタンまたはBボタンで、いつでも大画面を閉じる（縮小してリストへ復帰）
-                                                if (api.keys.isDetails(event) || event.key === Qt.Key_Y || api.keys.isCancel(event))
-                                                {
-                                                    event.accepted = true;
-                                                    zoomSound.play();
-                                                    gameRoot.isPanelZoomed = false;
-                                                }
-                                                // 大画面詳細モード中は、Aボタン（起動）とお気に入り（X）のみ裏側で連動可能にする
-                                                else if (api.keys.isAccept(event))
-                                                {
-                                                    event.accepted = true;
-                                                    api.memory.set("lastGameIndex", gameGrid.currentIndex);
-                                                    confirmSound.play();
-                                                    launchDelayTimer.start();
-                                                }
-                                                else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
-                                                {
-                                                    event.accepted = true;
-                                                    var currentGame1 = gameRoot.customSortedList[gameGrid.currentIndex];
-                                                    if (currentGame1)
-                                                    {
-                                                        currentGame1.favorite = !currentGame1.favorite; favoriteSound.play();
-                                                    }
-                                                }
-                                                return; // 拡大中は上下左右のカーソル移動（リスト操作）を完全に弾く
-                                            }
+                                    }
 
-                                            // 💡 通常モード中（ゲームリスト表示中）の標準キーマッピング
-                                            if (event.key === Qt.Key_Left)
-                                            {
-                                                event.accepted = true; gameGrid.moveCurrentIndexLeft(); moveSound.play();
-                                            }
-                                            else if (event.key === Qt.Key_Right) { event.accepted = true; gameGrid.moveCurrentIndexRight(); moveSound.play(); }
-                                                else if (event.key === Qt.Key_Up) { event.accepted = true; gameGrid.moveCurrentIndexUp(); moveSound.play(); }
-                                                    else if (event.key === Qt.Key_Down) { event.accepted = true; gameGrid.moveCurrentIndexDown(); moveSound.play(); }
-
-                                                        else if (api.keys.isAccept(event))
-                                                        {
-                                                            event.accepted = true;
-                                                            api.memory.set("lastGameIndex", gameGrid.currentIndex);
-                                                            confirmSound.play();
-                                                            launchDelayTimer.start();
-                                                        }
-                                                        else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
-                                                        {
-                                                            event.accepted = true;
-                                                            var currentGame2 = gameRoot.customSortedList[gameGrid.currentIndex];
-                                                            if (currentGame2)
-                                                            {
-                                                                currentGame2.favorite = !currentGame2.favorite; favoriteSound.play();
-                                                            }
-                                                        }
-                                                        else if (api.keys.isNextPage(event) || api.keys.isPrevPage(event) || event.key === Qt.Key_Tab)
-                                                        {
-                                                            event.accepted = true;
-                                                            filterSound.play();
-                                                            gameGrid.currentIndex = 0;
-                                                            api.memory.set("lastGameIndex", 0);
-                                                            gameRoot.currentFilter = (gameRoot.currentFilter === "all") ? "favorite" : "all";
-                                                        }
-                                                        // Yボタンで大画面へズームイン
-                                                        else if (api.keys.isDetails(event) || event.key === Qt.Key_Y)
-                                                        {
-                                                            event.accepted = true;
-                                                            zoomSound.play();
-                                                            gameRoot.isPanelZoomed = true;
-                                                        }
-                                                        else if (api.keys.isCancel(event))
-                                                        {
-                                                            event.accepted = true;
-                                                            gameRoot.goBack();
-                                                        }
-                                                    }
-
-                                                    // =========================================================================
-                                                    // 📥 4️⃣ 画面下部：操作ガイド（完璧なXbox公式カラー配色＆左寄せライン配置）
-                                                    // =========================================================================
-                                                    Rectangle {
-                                                        id: gameFooterBar
-                                                        anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 50; color: Qt.rgba(0, 0, 0, 0.5)
-                                                        Row {
-                                                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; anchors.leftMargin: 40; spacing: 25
-                                                            Row {
-                                                                spacing: 6;
-                                                                Rectangle {
-                                                                    width: 22;
-                                                                    height: 22;
-                                                                    radius: 11;
-                                                                    color: "#107c10";
-                                                                    anchors.verticalCenter: parent.verticalCenter;
-                                                                    Text {
-                                                                        text: "A";
-                                                                        color: "white";
-                                                                        font.bold: true;
-                                                                        font.pixelSize: 13;
-                                                                        anchors.centerIn: parent
-                                                                    }
-                                                                }
-                                                                Text {
-                                                                    text: "起動";
-                                                                    color: "white";
-                                                                    font.pixelSize: 13;
-                                                                    font.family: customFont.name;
-                                                                    anchors.verticalCenter: parent.verticalCenter
-                                                                }
-                                                            }
-
-                                                            Row {
-                                                                spacing: 6;
-                                                                Rectangle {
-                                                                    width: 22;
-                                                                    height: 22;
-                                                                    radius: 11;
-                                                                    color: "#e81123";
-                                                                    anchors.verticalCenter: parent.verticalCenter;
-                                                                    Text {
-                                                                        text: "B";
-                                                                        color: "white";
-                                                                        font.bold: true;
-                                                                        font.pixelSize: 13;
-                                                                        anchors.centerIn: parent
-                                                                    }
-                                                                }
-                                                                Text {
-                                                                    text: gameRoot.isPanelZoomed ? "詳細を閉じる" : "戻る";
-                                                                    color: "white";
-                                                                    font.pixelSize: 13;
-                                                                    font.family: customFont.name;
-                                                                    anchors.verticalCenter: parent.verticalCenter
-                                                                }
-                                                            }
-
-                                                            Row {
-                                                                spacing: 6;
-                                                                Rectangle {
-                                                                    width: 22;
-                                                                    height: 22;
-                                                                    radius: 11;
-                                                                    color: "#0078d4";
-                                                                    anchors.verticalCenter: parent.verticalCenter;
-                                                                    Text {
-                                                                        text: "X";
-                                                                        color: "white";
-                                                                        font.bold: true;
-                                                                        font.pixelSize: 13;
-                                                                        anchors.centerIn: parent
-                                                                    }
-                                                                }
-                                                                Text {
-                                                                    text: gameRoot.isPanelZoomed ? "ゲームリストに戻る" : "ゲーム詳細画面を開く";
-                                                                    color: "white";
-                                                                    font.pixelSize: 13;
-                                                                    font.family: customFont.name;
-                                                                    anchors.verticalCenter: parent.verticalCenter
-                                                                }
-                                                            }
-
-                                                            // 🟡 Yボタン操作ガイド（大画面モードの開閉状態をテキストに動的反映）
-                                                            Row {
-                                                                spacing: 6;
-                                                                Rectangle {
-                                                                    width: 22;
-                                                                    height: 22;
-                                                                    radius: 11;
-                                                                    color: "#ffb900";
-                                                                    anchors.verticalCenter: parent.verticalCenter;
-                                                                    Text {
-                                                                        text: "Y";
-                                                                        color: "#111111";
-                                                                        font.bold: true; font.pixelSize: 13;
-                                                                        anchors.centerIn: parent
-                                                                    }
-                                                                }
-                                                                Text {
-                                                                    text: "お気に入り";
-
-                                                                    color: "white";
-                                                                    font.pixelSize: 13;
-                                                                    font.family: customFont.name;
-                                                                    anchors.verticalCenter: parent.verticalCenter
-                                                                }
-                                                            }
-
-                                                            Row {
-                                                                spacing: 6;
-                                                                Rectangle {
-                                                                    width: 38;
-                                                                    height: 22;
-                                                                    radius: 4;
-                                                                    color: "#d2d2d2";
-                                                                    anchors.verticalCenter: parent.verticalCenter;
-                                                                    Text {
-                                                                        text: "L / R";
-                                                                        color: "#111111";
-                                                                        font.bold: true;
-                                                                        font.pixelSize: 11;
-                                                                        anchors.centerIn: parent
-                                                                    }
-                                                                }
-                                                                Text {
-                                                                    text: "お気に入り絞り込み (Tab)";
-                                                                    color: "white";
-                                                                    font.pixelSize: 13;
-                                                                    font.family: customFont.name;
-                                                                    anchors.verticalCenter: parent.verticalCenter
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                }

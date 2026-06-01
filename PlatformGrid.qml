@@ -163,7 +163,12 @@ FocusScope {
 
                     // ★決定音を鳴らして画面遷移
                     confirmSound.play();
+                    api.memory.set("returnFromGameFlag", true);
                     platformRoot.platformSelected(api.collections.get(currentIndex));
+                }
+                else if (api.keys.isCancel(event))
+                {
+                    api.memory.set("returnFromGameFlag", false);
                 }
             }
         }
