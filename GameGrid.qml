@@ -46,12 +46,12 @@ FocusScope {
                         // 💡 3. 【最重要】まずはQMLの公式関数を呼び出し、
                         // 目的のインデックス周辺のセルをメモリ上に「強制実体化」させます。
                         // 基準は画面上端（Beginning）に合わせます。
-                        gameGrid.positionViewAtIndex(savedIndex, GridView.Beginning);
+                        gameGrid.positionViewAtIndex(savedIndex, GridView.Center);
 
                         // 💡 4. 【絶対位置の微調整】
                         // セルが実体化したこの瞬間に、デバッグで判明した完璧な数式を上書きして
                         // 理想のスクロール位置（contentY）へぴったり固定します。
-                        var finalContentY = Math.floor((savedIndex - 1) * gameGrid.cellHeight / rowCount);
+                        var finalContentY = (savedIndex - 1) * gameGrid.cellHeight ;
                         gameGrid.contentY = Math.max(0, finalContentY);
 
                         // 5. 選択状態と操作フォーカスを固定
@@ -66,7 +66,7 @@ FocusScope {
 
             Timer {
                 id: snapResetTimer
-                interval: 50
+                interval: 100
                 repeat: false
                 onTriggered: {
                     gameGrid.snapMode = GridView.SnapToRow;
@@ -163,7 +163,7 @@ FocusScope {
                         // =========================================================================
                         property int baseWidth: {
                             var sName = currentCollection.shortName;
-                            if (sName === "steam" || sName === "ps2" || sName === "psp" || sName === "wii" || sName === "3ds" || sName === "ws" || sName === "wsc") return 220;
+                            if (sName === "steam" || sName === "ps2" || sName === "psp" || sName === "wii" || sName === "3ds" || sName === "ws" || sName === "wsc" || sNname === "psvita") return 220;
                             return 180;
                         }
 
@@ -177,7 +177,7 @@ FocusScope {
                             if (sName === "md" || sName === "mcd" || sName === "32x") return 1.306;
                             if (sName === "gb" || sName === "gbc" || sName === "gg") return 1.11;
                             if (sName === "ngp" || sName === "ngpc") return 1.052;
-                            if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii") return 1.777;
+                            if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii" || sName === "psvita") return 1.777;
                             if (sName === "ws" || sName === "wsc") return 1.5541;
                             return 1.333; // デフォルト値
                         }
@@ -961,11 +961,11 @@ FocusScope {
 
                                         else if (api.keys.isAccept(event))
                                         {
-                                            event.accepted = true;
                                             api.memory.set("lastGameIndex", gameGrid.currentIndex);
                                             api.memory.set("returnFromGameFlag", true);
                                             confirmSound.play();
                                             launchDelayTimer.start();
+                                            event.accepted = true;
                                         }
                                         else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
                                         {
