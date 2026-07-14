@@ -173,7 +173,7 @@ FocusScope {
                             if (sName === "md" || sName === "mcd" || sName === "32x") return 1.306;
                             if (sName === "gb" || sName === "gbc" || sName === "gg") return 1.11;
                             if (sName === "ngp" || sName === "ngpc") return 1.052;
-                            if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii" || sName === "wiiware" || sName === "psvita") return 1.777;
+                            if (sName === "ps2" || sName === "psp" || sName === "win" || sName === "wii" || sName === "wiiware" || sName === "psvita" || sName === "ps3" || sName === "switch") return 1.777;
                             if (sName === "ws" || sName === "wsc") return 1.5541;
                             return 1.333; // デフォルト値
                         }
@@ -321,11 +321,7 @@ FocusScope {
                                 width: parent.width;
 
                                 // 💡 認識に必須な gameData の階層を完全に維持します
-                                source: (gameRoot.customSortedList.length > 0 && gameRoot.customSortedList[gameGrid.currentIndex])
-                                ? (currentCollection.shortName !== "steam"
-                                ? (gameRoot.customSortedList[gameGrid.currentIndex].assets.screenshot ? gameRoot.customSortedList[gameGrid.currentIndex].assets.screenshot : "")
-                                : (gameRoot.customSortedList[gameGrid.currentIndex].assets.boxFront ? gameRoot.customSortedList[gameGrid.currentIndex].assets.boxFront : ""))
-                                : ""
+                                source: (gameRoot.customSortedList.length > 0 && gameRoot.customSortedList[gameGrid.currentIndex]) ? gameRoot.customSortedList[gameGrid.currentIndex].assets.boxFront : ""
 
                                 fillMode: Image.PreserveAspectFit;
                                 horizontalAlignment: Image.AlignHCenter;
@@ -876,267 +872,260 @@ FocusScope {
                                                     id: screenshotImage;
                                                     anchors.fill: parent;
                                                     anchors.margins: 0;
-                                                    source:
-                                                    if (currentCollection.shortName === "steam")
-                                                    {
-                                                        source: modelData.assets.boxFront ? modelData.assets.boxFront : "";
-                                                    }else {
-                                                    source: modelData.assets.screenshot ? modelData.assets.screenshot : "";
+                                                    source: modelData.assets.boxFront ? modelData.assets.boxFront : "";
+                                                    fillMode: Image.PreserveAspectCrop;
+                                                    horizontalAlignment: Image.AlignHCenter;
+                                                    verticalAlignment: Image.AlignVCenter;
+                                                    asynchronous: true;
+                                                    visible: source != "" && status !== Image.Error
                                                 }
-
-                                                fillMode: Image.PreserveAspectCrop;
-                                                horizontalAlignment: Image.AlignHCenter;
-                                                verticalAlignment: Image.AlignVCenter;
-                                                asynchronous: true;
-                                                visible: source != "" && status !== Image.Error
+                                                Image { id: favoriteIcon; anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6; width: 24; height: 24; source: "assets/icons/favorite.png"; fillMode: Image.PreserveAspectFit; asynchronous: true; z: 5; visible: modelData.favorite }
+                                                Text { id: fallbackText; anchors.centerIn: parent; width: parent.width - 20; text: modelData.title; color: "white"; font.pixelSize: 14; font.bold: true; font.family: customFont.name; visible: !screenshotImage.visible; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
                                             }
-                                            Image { id: favoriteIcon; anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 6; width: 24; height: 24; source: "assets/icons/favorite.png"; fillMode: Image.PreserveAspectFit; asynchronous: true; z: 5; visible: modelData.favorite }
-                                            Text { id: fallbackText; anchors.centerIn: parent; width: parent.width - 20; text: modelData.title; color: "white"; font.pixelSize: 14; font.bold: true; font.family: customFont.name; visible: !screenshotImage.visible; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
+                                        }
+                                        Keys.onLeftPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex % columns !== 0)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexLeft();
+                                        }
+                                        Keys.onRightPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if ((currentIndex % columns !== columns - 1) && (currentIndex + 1 < count))
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexRight();
+                                        }
+                                        Keys.onUpPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex >= columns)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexUp();
+                                        }
+                                        Keys.onDownPressed: {
+                                            var columns = Math.floor(width / cellWidth);
+                                            if (currentIndex + columns <= count)
+                                            {
+                                                moveSound.play();
+                                            }
+                                            moveCurrentIndexDown();
                                         }
                                     }
-                                    Keys.onLeftPressed: {
-                                        var columns = Math.floor(width / cellWidth);
-                                        if (currentIndex % columns !== 0)
+                                    // =========================================================================
+                                    // 🎮 【最重要・変更点2】キー入力を「外枠（FocusScope）」で統括して処理する
+                                    // =========================================================================
+                                    Keys.onPressed: {
+                                        // 💡 大画面詳細モード中（isPanelZoomed === true）の特別キーマッピング
+                                        if (gameRoot.isPanelZoomed)
                                         {
-                                            moveSound.play();
+                                            // YボタンまたはBボタンで、いつでも大画面を閉じる（縮小してリストへ復帰）
+                                            if (api.keys.isDetails(event) || event.key === Qt.Key_Y || api.keys.isCancel(event))
+                                            {
+                                                event.accepted = true;
+                                                zoomSound.play();
+                                                gameRoot.isPanelZoomed = false;
+                                            }
+                                            // 大画面詳細モード中は、Aボタン（起動）とお気に入り（X）のみ裏側で連動可能にする
+                                            else if (api.keys.isAccept(event))
+                                            {
+                                                event.accepted = true;
+                                                api.memory.set("lastGameIndex", gameGrid.currentIndex);
+                                                confirmSound.play();
+                                                launchDelayTimer.start();
+                                            }
+                                            else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
+                                            {
+                                                event.accepted = true;
+                                                var currentGame1 = gameRoot.customSortedList[gameGrid.currentIndex];
+                                                if (currentGame1)
+                                                {
+                                                    currentGame1.favorite = !currentGame1.favorite; favoriteSound.play();
+                                                }
+                                            }
+                                            return; // 拡大中は上下左右のカーソル移動（リスト操作）を完全に弾く
                                         }
-                                        moveCurrentIndexLeft();
-                                    }
-                                    Keys.onRightPressed: {
-                                        var columns = Math.floor(width / cellWidth);
-                                        if ((currentIndex % columns !== columns - 1) && (currentIndex + 1 < count))
-                                        {
-                                            moveSound.play();
-                                        }
-                                        moveCurrentIndexRight();
-                                    }
-                                    Keys.onUpPressed: {
-                                        var columns = Math.floor(width / cellWidth);
-                                        if (currentIndex >= columns)
-                                        {
-                                            moveSound.play();
-                                        }
-                                        moveCurrentIndexUp();
-                                    }
-                                    Keys.onDownPressed: {
-                                        var columns = Math.floor(width / cellWidth);
-                                        if (currentIndex + columns <= count)
-                                        {
-                                            moveSound.play();
-                                        }
-                                        moveCurrentIndexDown();
-                                    }
-                                }
-                                // =========================================================================
-                                // 🎮 【最重要・変更点2】キー入力を「外枠（FocusScope）」で統括して処理する
-                                // =========================================================================
-                                Keys.onPressed: {
-                                    // 💡 大画面詳細モード中（isPanelZoomed === true）の特別キーマッピング
-                                    if (gameRoot.isPanelZoomed)
-                                    {
-                                        // YボタンまたはBボタンで、いつでも大画面を閉じる（縮小してリストへ復帰）
-                                        if (api.keys.isDetails(event) || event.key === Qt.Key_Y || api.keys.isCancel(event))
-                                        {
-                                            event.accepted = true;
-                                            zoomSound.play();
-                                            gameRoot.isPanelZoomed = false;
-                                        }
-                                        // 大画面詳細モード中は、Aボタン（起動）とお気に入り（X）のみ裏側で連動可能にする
+
+                                        // 💡 通常モード中（ゲームリスト表示中）の標準キーマッピング
+
                                         else if (api.keys.isAccept(event))
                                         {
-                                            event.accepted = true;
                                             api.memory.set("lastGameIndex", gameGrid.currentIndex);
+                                            api.memory.set("returnFromGameFlag", true);
                                             confirmSound.play();
                                             launchDelayTimer.start();
+                                            event.accepted = true;
                                         }
                                         else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
                                         {
                                             event.accepted = true;
-                                            var currentGame1 = gameRoot.customSortedList[gameGrid.currentIndex];
-                                            if (currentGame1)
+                                            var currentGame2 = gameRoot.customSortedList[gameGrid.currentIndex];
+                                            if (currentGame2)
                                             {
-                                                currentGame1.favorite = !currentGame1.favorite; favoriteSound.play();
+                                                currentGame2.favorite = !currentGame2.favorite; favoriteSound.play();
                                             }
                                         }
-                                        return; // 拡大中は上下左右のカーソル移動（リスト操作）を完全に弾く
-                                    }
-
-                                    // 💡 通常モード中（ゲームリスト表示中）の標準キーマッピング
-
-                                    else if (api.keys.isAccept(event))
-                                    {
-                                        api.memory.set("lastGameIndex", gameGrid.currentIndex);
-                                        api.memory.set("returnFromGameFlag", true);
-                                        confirmSound.play();
-                                        launchDelayTimer.start();
-                                        event.accepted = true;
-                                    }
-                                    else if (api.keys.isFilters(event) || event.key === Qt.Key_F)
-                                    {
-                                        event.accepted = true;
-                                        var currentGame2 = gameRoot.customSortedList[gameGrid.currentIndex];
-                                        if (currentGame2)
+                                        else if (api.keys.isNextPage(event) || api.keys.isPrevPage(event) || event.key === Qt.Key_Tab)
                                         {
-                                            currentGame2.favorite = !currentGame2.favorite; favoriteSound.play();
+                                            event.accepted = true;
+                                            filterSound.play();
+                                            gameGrid.currentIndex = 0;
+                                            api.memory.set("lastGameIndex", 0);
+                                            gameRoot.currentFilter = (gameRoot.currentFilter === "all") ? "favorite" : "all";
+                                        }
+                                        // Yボタンで大画面へズームイン
+                                        else if (api.keys.isDetails(event) || event.key === Qt.Key_Y)
+                                        {
+                                            event.accepted = true;
+                                            zoomSound.play();
+                                            gameRoot.isPanelZoomed = true;
+                                        }
+                                        else if (api.keys.isCancel(event))
+                                        {
+                                            event.accepted = true;
+                                            api.memory.set("returnFromGameFlag", false);
+                                            gameRoot.goBack();
                                         }
                                     }
-                                    else if (api.keys.isNextPage(event) || api.keys.isPrevPage(event) || event.key === Qt.Key_Tab)
-                                    {
-                                        event.accepted = true;
-                                        filterSound.play();
-                                        gameGrid.currentIndex = 0;
-                                        api.memory.set("lastGameIndex", 0);
-                                        gameRoot.currentFilter = (gameRoot.currentFilter === "all") ? "favorite" : "all";
+
+                                    // =========================================================================
+                                    // 📥 4️⃣ 画面下部：操作ガイド（完璧なXbox公式カラー配色＆左寄せライン配置）
+                                    // =========================================================================
+                                    Rectangle {
+                                        id: gameFooterBar
+                                        anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 50; color: Qt.rgba(0, 0, 0, 0.5)
+                                        Row {
+                                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; anchors.leftMargin: 40; spacing: 25
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#107c10";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "A";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "起動";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#e81123";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "B";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: gameRoot.isPanelZoomed ? "詳細を閉じる" : "戻る";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#0078d4";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "X";
+                                                        color: "white";
+                                                        font.bold: true;
+                                                        font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: gameRoot.isPanelZoomed ? "ゲームリストに戻る" : "ゲーム詳細画面を開く";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            // 🟡 Yボタン操作ガイド（大画面モードの開閉状態をテキストに動的反映）
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 22;
+                                                    height: 22;
+                                                    radius: 11;
+                                                    color: "#ffb900";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "Y";
+                                                        color: "#111111";
+                                                        font.bold: true; font.pixelSize: 13;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "お気に入り";
+
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+
+                                            Row {
+                                                spacing: 6;
+                                                Rectangle {
+                                                    width: 38;
+                                                    height: 22;
+                                                    radius: 4;
+                                                    color: "#d2d2d2";
+                                                    anchors.verticalCenter: parent.verticalCenter;
+                                                    Text {
+                                                        text: "L / R";
+                                                        color: "#111111";
+                                                        font.bold: true;
+                                                        font.pixelSize: 11;
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                                Text {
+                                                    text: "お気に入り絞り込み (Tab)";
+                                                    color: "white";
+                                                    font.pixelSize: 13;
+                                                    font.family: customFont.name;
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+                                        }
                                     }
-                                    // Yボタンで大画面へズームイン
-                                    else if (api.keys.isDetails(event) || event.key === Qt.Key_Y)
-                                    {
-                                        event.accepted = true;
-                                        zoomSound.play();
-                                        gameRoot.isPanelZoomed = true;
-                                    }
-                                    else if (api.keys.isCancel(event))
-                                    {
-                                        event.accepted = true;
-                                        api.memory.set("returnFromGameFlag", false);
-                                        gameRoot.goBack();
-                                    }
+
                                 }
-
-                                // =========================================================================
-                                // 📥 4️⃣ 画面下部：操作ガイド（完璧なXbox公式カラー配色＆左寄せライン配置）
-                                // =========================================================================
-                                Rectangle {
-                                    id: gameFooterBar
-                                    anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; height: 50; color: Qt.rgba(0, 0, 0, 0.5)
-                                    Row {
-                                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; anchors.leftMargin: 40; spacing: 25
-                                        Row {
-                                            spacing: 6;
-                                            Rectangle {
-                                                width: 22;
-                                                height: 22;
-                                                radius: 11;
-                                                color: "#107c10";
-                                                anchors.verticalCenter: parent.verticalCenter;
-                                                Text {
-                                                    text: "A";
-                                                    color: "white";
-                                                    font.bold: true;
-                                                    font.pixelSize: 13;
-                                                    anchors.centerIn: parent
-                                                }
-                                            }
-                                            Text {
-                                                text: "起動";
-                                                color: "white";
-                                                font.pixelSize: 13;
-                                                font.family: customFont.name;
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-
-                                        Row {
-                                            spacing: 6;
-                                            Rectangle {
-                                                width: 22;
-                                                height: 22;
-                                                radius: 11;
-                                                color: "#e81123";
-                                                anchors.verticalCenter: parent.verticalCenter;
-                                                Text {
-                                                    text: "B";
-                                                    color: "white";
-                                                    font.bold: true;
-                                                    font.pixelSize: 13;
-                                                    anchors.centerIn: parent
-                                                }
-                                            }
-                                            Text {
-                                                text: gameRoot.isPanelZoomed ? "詳細を閉じる" : "戻る";
-                                                color: "white";
-                                                font.pixelSize: 13;
-                                                font.family: customFont.name;
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-
-                                        Row {
-                                            spacing: 6;
-                                            Rectangle {
-                                                width: 22;
-                                                height: 22;
-                                                radius: 11;
-                                                color: "#0078d4";
-                                                anchors.verticalCenter: parent.verticalCenter;
-                                                Text {
-                                                    text: "X";
-                                                    color: "white";
-                                                    font.bold: true;
-                                                    font.pixelSize: 13;
-                                                    anchors.centerIn: parent
-                                                }
-                                            }
-                                            Text {
-                                                text: gameRoot.isPanelZoomed ? "ゲームリストに戻る" : "ゲーム詳細画面を開く";
-                                                color: "white";
-                                                font.pixelSize: 13;
-                                                font.family: customFont.name;
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-
-                                        // 🟡 Yボタン操作ガイド（大画面モードの開閉状態をテキストに動的反映）
-                                        Row {
-                                            spacing: 6;
-                                            Rectangle {
-                                                width: 22;
-                                                height: 22;
-                                                radius: 11;
-                                                color: "#ffb900";
-                                                anchors.verticalCenter: parent.verticalCenter;
-                                                Text {
-                                                    text: "Y";
-                                                    color: "#111111";
-                                                    font.bold: true; font.pixelSize: 13;
-                                                    anchors.centerIn: parent
-                                                }
-                                            }
-                                            Text {
-                                                text: "お気に入り";
-
-                                                color: "white";
-                                                font.pixelSize: 13;
-                                                font.family: customFont.name;
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-
-                                        Row {
-                                            spacing: 6;
-                                            Rectangle {
-                                                width: 38;
-                                                height: 22;
-                                                radius: 4;
-                                                color: "#d2d2d2";
-                                                anchors.verticalCenter: parent.verticalCenter;
-                                                Text {
-                                                    text: "L / R";
-                                                    color: "#111111";
-                                                    font.bold: true;
-                                                    font.pixelSize: 11;
-                                                    anchors.centerIn: parent
-                                                }
-                                            }
-                                            Text {
-                                                text: "お気に入り絞り込み (Tab)";
-                                                color: "white";
-                                                font.pixelSize: 13;
-                                                font.family: customFont.name;
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-                                    }
-                                }
-
-                            }
